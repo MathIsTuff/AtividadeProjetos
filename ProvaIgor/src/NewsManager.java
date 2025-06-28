@@ -2,146 +2,180 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.*;
 import java.lang.reflect.Type;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class NewsManager {
-    List<News> favorites = new ArrayList<>();
-    List<News> readLater = new ArrayList<>();
-    List<News> toReadLater = new ArrayList<>();
-    Gson gson = new GsonBuilder().setPrettyPrinting().create();
-    HttpClient client = HttpClient.newHttpClient();
+    private final List<News> favorites = new ArrayList<>();
+    private final List<News> readLater = new ArrayList<>();
+    private final List<News> readNews = new ArrayList<>();
+    private final HttpClient client = HttpClient.newHttpClient();
+    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
-    public void searchNews(Scanner scanner) {
-        try {
-            System.out.print("Digite uma palavra-chave para buscar: ");
-            String keyword = scanner.nextLine();
-            String url = "https://servicodados.ibge.gov.br/api/v3/noticias/?q=" + keyword;
+    private final String FAVORITES_FILE = "favorites.json";
+    private final String READLATER_FILE = "readlater.json";
+    private final String READ_FILE = "read.json";
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+    public NewsManager() {
+        loadLists();
+    }
 
-            ApiResponse apiResponse = gson.fromJson(response.body(), ApiResponse.class);
+    // Busca notícias pela API do IBGE, filtrando por modo
+    public List<News> searchNews(String query, String mode) throws Exception {
+    String url = "https://servicodados.ibge.gov.br/api/v3/noticias/?q=" + URLEncoder.encode(query, StandardCharsets.UTF_8);
+    HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+    HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (apiResponse.items.isEmpty()) {
-                System.out.println("Nenhuma notícia encontrada.");
+    if (response.statusCode() == 200) {
+        ApiResponse apiResponse = gson.fromJson(response.body(), ApiResponse.class);
+        if (apiResponse == null || apiResponse.items == null) {
+            System.out.println("Nenhuma notícia encontrada.");
+            return Collections.emptyList();
+        }
+
+        List<News> results = apiResponse.items;
+
+        if (mode.equalsIgnoreCase("date")) {
+            results = results.stream()
+                    .filter(n -> n.publicationDate != null && n.publicationDate.contains(query))
+                    .collect(Collectors.toList());
+        } else if (mode.equalsIgnoreCase("keyword")) {
+            results = results.stream()
+                    .filter(n -> (n.title != null && n.title.toLowerCase().contains(query.toLowerCase())) ||
+                                 (n.intro != null && n.intro.toLowerCase().contains(query.toLowerCase())))
+                    .collect(Collectors.toList());
+        } else { // título
+            results = results.stream()
+                    .filter(n -> n.title != null && n.title.toLowerCase().contains(query.toLowerCase()))
+                    .collect(Collectors.toList());
+        }
+
+        return results;
+    } else {
+        System.out.println("Erro ao buscar notícias: HTTP " + response.statusCode());
+        return Collections.emptyList();
+    }
+}
+
+
+    public void addFavorite(News news) {
+        if (!favorites.contains(news)) {
+            favorites.add(news);
+            saveList(FAVORITES_FILE, favorites);
+            System.out.println("Adicionado aos favoritos!");
+        } else {
+            System.out.println("Já está nos favoritos.");
+        }
+    }
+
+    public void markAsRead(News news) {
+        if (!readNews.contains(news)) {
+            readNews.add(news);
+            saveList(READ_FILE, readNews);
+            System.out.println("Marcado como lido!");
+        } else {
+            System.out.println("Já estava marcado como lido.");
+        }
+    }
+
+    public void addReadLater(News news) {
+        if (!readLater.contains(news)) {
+            readLater.add(news);
+            saveList(READLATER_FILE, readLater);
+            System.out.println("Adicionado para ler depois!");
+        } else {
+            System.out.println("Já estava na lista.");
+        }
+    }
+
+    public void showList(String listName) {
+        List<News> list;
+        switch (listName) {
+            case "favorites" -> list = favorites;
+            case "readlater" -> list = readLater;
+            case "read" -> list = readNews;
+            default -> {
+                System.out.println("Lista inválida.");
                 return;
             }
-
-            int i = 1;
-            for (News news : apiResponse.items) {
-                System.out.println("\n[" + i + "] " + news.title);
-                System.out.println("Introdução: " + news.intro);
-                System.out.println("Data: " + news.publicationDate);
-                System.out.println("Link: " + news.link);
-                System.out.println("Tipo: " + news.type);
-                i++;
-            }
-
-            System.out.print("\nDigite o número da notícia para gerenciar ou 0 para voltar: ");
-            int choice = Integer.parseInt(scanner.nextLine());
-            if (choice > 0 && choice <= apiResponse.items.size()) {
-                News selected = apiResponse.items.get(choice - 1);
-                handleNewsOptions(selected, scanner);
-            }
-
-        } catch (Exception e) {
-            System.out.println("Erro ao buscar notícias: " + e.getMessage());
         }
-    }
 
-    private void handleNewsOptions(News news, Scanner scanner) {
-        boolean managing = true;
-        while (managing) {
-            System.out.println("\n[1] Adicionar aos Favoritos");
-            System.out.println("[2] Marcar como Lida");
-            System.out.println("[3] Adicionar para Ler Depois");
-            System.out.println("[0] Voltar");
-            System.out.print("Escolha: ");
-            int option = Integer.parseInt(scanner.nextLine());
-
-            switch (option) {
-                case 1 -> {
-                    if (!favorites.contains(news)) {
-                        favorites.add(news);
-                        System.out.println("Adicionado aos favoritos.");
-                    } else {
-                        favorites.remove(news);
-                        System.out.println("Removido dos favoritos.");
-                    }
-                }
-                case 2 -> {
-                    if (!readLater.contains(news)) {
-                        readLater.add(news);
-                        System.out.println("Marcado como lida.");
-                    } else {
-                        readLater.remove(news);
-                        System.out.println("Removido da lista de lidas.");
-                    }
-                }
-                case 3 -> {
-                    if (!toReadLater.contains(news)) {
-                        toReadLater.add(news);
-                        System.out.println("Adicionado para ler depois.");
-                    } else {
-                        toReadLater.remove(news);
-                        System.out.println("Removido da lista para ler depois.");
-                    }
-                }
-                case 0 -> managing = false;
-                default -> System.out.println("Opção inválida.");
-            }
-        }
-    }
-
-    public void showList(List<News> list, Scanner scanner, String listName) {
         if (list.isEmpty()) {
-            System.out.println("Lista " + listName + " está vazia.");
+            System.out.println("Lista vazia.");
             return;
         }
 
-        list.sort(Comparator.comparing(n -> n.title));
+        list.forEach(this::printNews);
+    }
 
-        int i = 1;
-        for (News news : list) {
-            System.out.println("\n[" + i + "] " + news.title);
-            System.out.println("Introdução: " + news.intro);
-            System.out.println("Data: " + news.publicationDate);
-            System.out.println("Link: " + news.link);
-            System.out.println("Tipo: " + news.type);
-            i++;
+    public void sortList(String listName, String sortBy) {
+        List<News> list;
+        switch (listName) {
+            case "favorites" -> list = favorites;
+            case "readlater" -> list = readLater;
+            case "read" -> list = readNews;
+            default -> {
+                System.out.println("Lista inválida.");
+                return;
+            }
+        }
+
+        switch (sortBy) {
+            case "title" -> list.sort(Comparator.comparing(n -> n.title != null ? n.title : ""));
+            case "date" -> list.sort(Comparator.comparing(n -> n.publicationDate != null ? n.publicationDate : ""));
+            case "type" -> list.sort(Comparator.comparing(n -> n.type != null ? n.type : ""));
+            default -> System.out.println("Ordenação inválida.");
+        }
+
+        list.forEach(this::printNews);
+    }
+
+    public void printNews(News news) {
+        System.out.println("[" + news.id + "] " + news.title);
+        System.out.println("Introdução: " + news.intro);
+        System.out.println("Data: " + news.publicationDate);
+        System.out.println("Link: " + news.link);
+        System.out.println("Tipo: " + news.type);
+        System.out.println("------------------------------");
+    }
+
+    private void saveList(String fileName, List<News> list) {
+        try (Writer writer = new FileWriter(fileName)) {
+            gson.toJson(list, writer);
+        } catch (IOException e) {
+            System.out.println("Erro ao salvar lista: " + e.getMessage());
         }
     }
 
-    public void saveData() {
-        try (FileWriter writer = new FileWriter("data.json")) {
-            Map<String, List<News>> data = new HashMap<>();
-            data.put("favorites", favorites);
-            data.put("readLater", readLater);
-            data.put("toReadLater", toReadLater);
-            gson.toJson(data, writer);
-            System.out.println("Dados salvos com sucesso.");
-        } catch (Exception e) {
-            System.out.println("Erro ao salvar dados: " + e.getMessage());
+    private void loadLists() {
+        favorites.addAll(loadList(FAVORITES_FILE));
+        readLater.addAll(loadList(READLATER_FILE));
+        readNews.addAll(loadList(READ_FILE));
+    }
+
+    private List<News> loadList(String fileName) {
+        if (!Files.exists(Paths.get(fileName))) return new ArrayList<>();
+        try (Reader reader = new FileReader(fileName)) {
+            Type listType = new TypeToken<List<News>>(){}.getType();
+            return gson.fromJson(reader, listType);
+        } catch (IOException e) {
+            System.out.println("Erro ao carregar lista " + fileName);
+            return new ArrayList<>();
         }
     }
 
-    public void loadData() {
-        try (FileReader reader = new FileReader("data.json")) {
-            Type type = new TypeToken<Map<String, List<News>>>() {}.getType();
-            Map<String, List<News>> data = gson.fromJson(reader, type);
-            favorites = data.getOrDefault("favorites", new ArrayList<>());
-            readLater = data.getOrDefault("readLater", new ArrayList<>());
-            toReadLater = data.getOrDefault("toReadLater", new ArrayList<>());
-            System.out.println("Dados carregados com sucesso.");
-        } catch (Exception e) {
-            System.out.println("Nenhum dado salvo encontrado, começando do zero.");
-        }
+
+    private static class ApiResponse {
+        List<News> items;
     }
 }
