@@ -6,9 +6,10 @@ public class App {
         Scanner scanner = new Scanner(System.in);
         NewsManager manager = new NewsManager();
 
-        System.out.print("Digite seu nome ou apelido: ");
-        String username = scanner.nextLine();
-        System.out.println("\nOlá, " + username + "! Bem-vindo ao Blog IBGE.\n");
+        UserManager userManager = new UserManager();
+        String username = userManager.getUsername();
+        System.out.println("Usuário atual: " + username);
+
 
         boolean running = true;
 
@@ -16,7 +17,7 @@ public class App {
             System.out.println("\nEscolha uma opção:");
             System.out.println("[1] Buscar notícia por título");
             System.out.println("[2] Buscar notícia por palavra-chave");
-            System.out.println("[3] Buscar notícia por data (AAAA-MM-DD)");
+            System.out.println("[3] Buscar notícia por data (DD/MM/AAAA)");
             System.out.println("[4] Ver lista de favoritos");
             System.out.println("[5] Ver lista 'ler depois'");
             System.out.println("[6] Ver lista de lidas");
@@ -68,15 +69,19 @@ public class App {
                 case "4" -> {
                     System.out.println("\n--- FAVORITOS ---");
                     manager.showList("favorites");
+                    ordenarPrompt(scanner, manager, "favorites");
                 }
                 case "5" -> {
                     System.out.println("\n--- LER DEPOIS ---");
                     manager.showList("readlater");
+                    ordenarPrompt(scanner, manager, "readlater");
                 }
                 case "6" -> {
                     System.out.println("\n--- LIDAS ---");
                     manager.showList("read");
+                    ordenarPrompt(scanner, manager, "read");
                 }
+
                 case "7" -> {
                     System.out.println("Saindo... Até logo, " + username + "!");
                     running = false;
@@ -85,5 +90,29 @@ public class App {
             }
         }
         scanner.close();
+   
+
     }
+         private static void ordenarPrompt(Scanner scanner, NewsManager manager, String listName) {
+    System.out.println("Deseja ordenar essa lista? [s/n]");
+    String resposta = scanner.nextLine();
+    if (resposta.equalsIgnoreCase("s")) {
+        System.out.println("Escolha o critério:");
+        System.out.println("[1] Título (A-Z)");
+        System.out.println("[2] Data de publicação");
+        System.out.println("[3] Tipo/categoria");
+        String criterio = scanner.nextLine();
+        String sortBy = switch (criterio) {
+            case "1" -> "title";
+            case "2" -> "date";
+            case "3" -> "type";
+            default -> "";
+        };
+        if (!sortBy.isEmpty()) {
+            manager.sortList(listName, sortBy);
+        } else {
+            System.out.println("Critério inválido.");
+        }
+    }
+}
 }
